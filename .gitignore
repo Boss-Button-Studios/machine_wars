@@ -1,0 +1,45 @@
+# Build outputs
+/build/
+/*/build/
+*.apk
+*.aab
+*.ap_
+
+# Gradle
+.gradle/
+gradle-wrapper.jar
+local.properties
+
+# Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Credentials and signing — NEVER commit these (see SECURITY_TESTING.md §6)
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+release.properties
+
+# API keys and ad unit IDs
+ads.properties
+admob.properties
+secrets.properties
+
+# Google services config (contains app ID)
+google-services.json
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Test results and coverage
+/test-results/
+/coverage/
