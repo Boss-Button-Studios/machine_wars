@@ -1,0 +1,89 @@
+package com.bossbuttonstudios.machinewars.core
+
+import com.bossbuttonstudios.machinewars.model.economy.Store
+import com.bossbuttonstudios.machinewars.model.economy.Wallet
+import com.bossbuttonstudios.machinewars.model.factory.Component
+import com.bossbuttonstudios.machinewars.model.factory.FactoryGrid
+import com.bossbuttonstudios.machinewars.model.map.Wreckage
+import com.bossbuttonstudios.machinewars.model.mission.MissionConfig
+import com.bossbuttonstudios.machinewars.model.mission.MissionType
+import com.bossbuttonstudios.machinewars.model.unit.UnitInstance
+import com.bossbuttonstudios.machinewars.model.unit.UnitState
+
+/**
+ * The complete mutable state of a running mission.
+ *
+ * Every system reads from and writes to this object. It is intentionally a
+ * plain data container — no logic lives here. Logic belongs in the systems
+ * (combat, drivetrain, wave management) that operate on it.
+ *
+ * Thread-safety: all mutations happen on the single game-loop coroutine.
+ * The renderer takes a snapshot for interpolation; it never writes here.
+ */
+class GameState(
+    val mission: MissionConfig,
+    val factory: FactoryGrid,
+    val wallet: Wallet = Wallet(),
+    val store: Store = Store(),
+    val playerInventory: MutableList<Component> = mutableListOf(),
+) {
+    // --- Battlefield units ---
+    val units: MutableList<UnitInstance> = mutableListOf()
+
+    val livingUnits: List<UnitInstance>
+        get() = units.filter { it.isAlive }
+
+    // --- Terrain ---
+    val wreckage: MutableList<Wreckage> = mutableListOf()
+
+    // --- Wave tracking ---
+    var currentWaveIndex: Int = 0
+    var waveSpawnCursor: Int = 0       // how many units in the current wave have been spawned
+    var timeUntilNextSpawn: Float = 0f // seconds until next unit in current wave deploys
+
+    // --- Mission clock ---
+    var elapsedSeconds: Float = 0f
+
+    // --- Enemy base HP (BASE_ATTACK missions only) ---
+    var enemyBaseHp: Float = BASE_HP
+
+    // --- Win/loss ---
+    var isOver: Boolean = false
+    var playerWon: Boolean = false
+
+    // --- Pending lane assignments from input (Session 5 writes here) ---
+    /**
+     * Maps machine ID to the lane the player has assigned it to.
+     * Combat systems read this each spawn tick.
+     */
+    val laneAssignments: MutableMap<java.util.UUID, Int> = mutableMapOf()
+
+    // --- Convenience queries ---
+
+    /** Remaining survival time; only meaningful for TIMED_SURVIVAL missions. */
+    val survivalTimeRemaining: Float
+        get() = (mission.timeLimitSeconds - elapsedSeconds).coerceAtLeast(0f)
+
+    /** True when survival timer has expired (does not mean the mission is won). */
+    val survivalTimerExpired: Boolean
+        get() = mission.type == MissionType.TIMED_SURVIVAL &&
+                elapsedSeconds >= mission.timeLimitSeconds
+
+    /** True when the resource target has been met (RESOURCE_HUNT). */
+    val resourceTargetMet: Boolean
+        get() = mission.type == MissionType.RESOURCE_HUNT &&
+                wallet.ore >= mission.oreTarget
+
+    /** Removes all dead units and cleared wreckage, returning counts for logging. */
+    fun purgeDeadEntities(): Pair<Int, Int> {
+        val deadUnits = units.count { !it.isAlive }
+        val clearedWreckage = wreckage.count { it.isCleared }
+        units.removeAll { !it.isAlive }
+        wreckage.removeAll { it.isCleared }
+        return deadUnits to clearedWreckage
+    }
+
+    companion object {
+        const val BASE_HP = 500f
+    }
+}
