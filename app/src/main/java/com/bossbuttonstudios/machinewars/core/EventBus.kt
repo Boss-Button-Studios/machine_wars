@@ -1,6 +1,8 @@
 package com.bossbuttonstudios.machinewars.core
 
+import com.bossbuttonstudios.machinewars.model.factory.ComponentType
 import kotlin.reflect.KClass
+import java.util.UUID
 
 /**
  * Lightweight synchronous event bus.
@@ -37,7 +39,7 @@ class EventBus {
 }
 
 // ---------------------------------------------------------------------------
-// Game events — add more in later sessions as needed
+// Game events
 // ---------------------------------------------------------------------------
 
 /** A unit was destroyed. */
@@ -56,3 +58,28 @@ data class OreChangedEvent(val newTotal: Int)
 
 /** The mission ended. */
 data class MissionEndedEvent(val playerWon: Boolean)
+
+// --- Session 2 events ---
+
+/**
+ * A drivetrain component expired (wearPct reached 1.0) and was removed
+ * from the grid. The network gap it leaves reduces output until the slot
+ * is filled (spec §5.6).
+ */
+data class ComponentExpiredEvent(
+    val gridX: Int,
+    val gridY: Int,
+    val type: ComponentType,
+)
+
+/**
+ * A machine's computed output rate changed this tick.
+ *
+ * Posted after each solve pass for machines whose rate has changed by more
+ * than a small epsilon. The renderer uses this to update bar-fill animations
+ * on machine faces (spec §5.9).
+ */
+data class MachineOutputRateChangedEvent(
+    val machineId: UUID,
+    val newRate: Float,
+)

@@ -10,7 +10,7 @@ package com.bossbuttonstudios.machinewars.model.factory
  * one cell and cannot be displaced.
  *
  * Power-flow state (RPM, torque at each node) is computed by the drivetrain
- * simulation in Session 2 and stored in [powerFlow].
+ * simulation (Session 2) and stored in [powerFlow].
  */
 class FactoryGrid(
     val motorGridX: Int,
@@ -30,7 +30,17 @@ class FactoryGrid(
     /** Resolved power output at each grid cell; updated by drivetrain sim. */
     val powerFlow = mutableMapOf<Pair<Int, Int>, Float>()
 
-    // --- Placement helpers ---
+    /**
+     * Explicit belt connections between pulley/gear-pulley cells.
+     * Populated by input handling (Session 5) and readable by the drivetrain
+     * solver each tick. Belts are free and do not consume grid cells.
+     */
+    private val _beltConnections = mutableListOf<BeltConnection>()
+    val beltConnections: List<BeltConnection> get() = _beltConnections
+
+    // -----------------------------------------------------------------------
+    // Component placement
+    // -----------------------------------------------------------------------
 
     fun isInBounds(x: Int, y: Int): Boolean = x in 0 until COLS && y in 0 until ROWS
 
@@ -53,11 +63,14 @@ class FactoryGrid(
 
     /**
      * Removes the component at (x, y) and returns it (null if none).
+     * Any belt connections that referenced this cell are also removed.
      */
     fun remove(x: Int, y: Int): Component? {
         val c = _components.remove(x to y) ?: return null
         c.gridX = -1
         c.gridY = -1
+        // Orphaned belt connections are invalid — remove them.
+        _beltConnections.removeAll { it.connects(x, y) }
         return c
     }
 
@@ -65,5 +78,48 @@ class FactoryGrid(
     fun componentAt(x: Int, y: Int): Component? = _components[x to y]
 
     /** Returns the machine at (x, y), or null. */
-    fun machineAt(x: Int, y: Int): Machine? = machines.firstOrNull { it.gridX == x && it.gridY == y }
+    fun machineAt(x: Int, y: Int): Machine? =
+        machines.firstOrNull { it.gridX == x && it.gridY == y }
+
+    // -----------------------------------------------------------------------
+    // Belt management
+    // -----------------------------------------------------------------------
+
+    /**
+     * Adds a belt connection between (fromX, fromY) and (toX, toY).
+     *
+     * @return false if the connection already exists or either endpoint is
+     *         out of bounds; true on success.
+     */
+    fun addBelt(belt: BeltConnection): Boolean {
+        if (!isInBounds(belt.fromX, belt.fromY)) return false
+        if (!isInBounds(belt.toX, belt.toY))   return false
+        if (belt.from == belt.to)                return false
+        // Reject duplicate connections (either direction).
+        val alreadyExists = _beltConnections.any {
+            (it.from == belt.from && it.to == belt.to) ||
+            (it.from == belt.to   && it.to == belt.from)
+        }
+        if (alreadyExists) return false
+        _beltConnections.add(belt)
+        return true
+    }
+
+    /**
+     * Removes the belt connection between the two given endpoints.
+     * Order of from/to does not matter.
+     *
+     * @return true if a connection was found and removed, false otherwise.
+     */
+    fun removeBelt(fromX: Int, fromY: Int, toX: Int, toY: Int): Boolean =
+        _beltConnections.removeAll {
+            (it.fromX == fromX && it.fromY == fromY && it.toX == toX && it.toY == toY) ||
+            (it.fromX == toX   && it.fromY == toY   && it.toX == fromX && it.toY == fromY)
+        }
+
+    /**
+     * Returns all belt connections that have (x, y) as either endpoint.
+     */
+    fun beltsAt(x: Int, y: Int): List<BeltConnection> =
+        _beltConnections.filter { it.connects(x, y) }
 }

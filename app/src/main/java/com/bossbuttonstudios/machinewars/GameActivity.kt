@@ -5,7 +5,11 @@ import androidx.appcompat.app.AppCompatActivity
 import com.bossbuttonstudios.machinewars.core.EventBus
 import com.bossbuttonstudios.machinewars.core.GameLoop
 import com.bossbuttonstudios.machinewars.core.GameState
+import com.bossbuttonstudios.machinewars.core.MachineOutputRateChangedEvent
 import com.bossbuttonstudios.machinewars.core.MissionEndedEvent
+import com.bossbuttonstudios.machinewars.core.OreChangedEvent
+import com.bossbuttonstudios.machinewars.drivetrain.DrivetrainSolver
+import com.bossbuttonstudios.machinewars.drivetrain.WearSystem
 import com.bossbuttonstudios.machinewars.interfaces.NoOpAdProvider
 import com.bossbuttonstudios.machinewars.interfaces.NoOpRenderer
 import com.bossbuttonstudios.machinewars.model.economy.Wallet
@@ -28,6 +32,7 @@ import kotlinx.coroutines.cancel
  *  - A factory grid with the motor at (0, 0) and no pre-placed machines
  *  - No-op renderer and ad provider
  *  - The event bus and game loop
+ *  - DrivetrainSolver and WearSystem (Session 2)
  *
  * Real rendering, input, and ad integration drop in as the sessions
  * progress without touching the logic assembled here.
@@ -38,6 +43,10 @@ class GameActivity : AppCompatActivity() {
     private lateinit var gameLoop: GameLoop
     private lateinit var eventBus: EventBus
 
+    // Session 2 systems
+    private val drivetrainSolver = DrivetrainSolver()
+    private val wearSystem       = WearSystem()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -47,11 +56,11 @@ class GameActivity : AppCompatActivity() {
         val factory = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = emptyList())
         val state   = GameState(mission = mission, factory = factory, wallet = Wallet(initialOre = 50))
 
-        val renderer  = NoOpRenderer()
-        val adProvider = NoOpAdProvider()
+        val renderer   = NoOpRenderer()
+        @Suppress("UNUSED_VARIABLE") val adProvider = NoOpAdProvider() // wired in Session 4
 
         // Subscribe to mission-end events to handle win/loss UI (stub).
-        eventBus.on<MissionEndedEvent> { event ->
+        eventBus.on<MissionEndedEvent> { _ ->
             // TODO Session 4+: show result screen
         }
 
@@ -60,14 +69,50 @@ class GameActivity : AppCompatActivity() {
             state    = state,
             renderer = renderer,
             onTick   = { dt, s ->
-                // Systems will be registered here in Sessions 2, 3, 6.
+                tickDrivetrain(dt, s)
                 s.elapsedSeconds += dt
-                eventBus.post(com.bossbuttonstudios.machinewars.core.OreChangedEvent(s.wallet.ore))
+                eventBus.post(OreChangedEvent(s.wallet.ore))
+                // Session 3: combat system tick goes here
+                // Session 6: wave management tick goes here
             },
         )
 
         gameLoop.start()
     }
+
+    // -----------------------------------------------------------------------
+    // Session 2: drivetrain tick
+    // -----------------------------------------------------------------------
+
+    private fun tickDrivetrain(dt: Float, state: GameState) {
+        // 1. Solve the network — pure computation, no side effects.
+        val result = drivetrainSolver.solve(state.factory, dt)
+
+        // 2. Store result in game state for tooltip reads and other systems.
+        state.drivetrainResult = result
+
+        // 3. Update machine output rates and emit change events.
+        val previousRates = state.factory.machines.associate { it.id to it.outputRatePerSec }
+        result.machineOutputRates.forEach { (id, newRate) ->
+            val machine = state.factory.machines.find { it.id == id } ?: return@forEach
+            if (Math.abs(newRate - (previousRates[id] ?: 0f)) > RATE_CHANGE_EPSILON) {
+                machine.outputRatePerSec = newRate
+                eventBus.post(MachineOutputRateChangedEvent(id, newRate))
+            } else {
+                machine.outputRatePerSec = newRate
+            }
+        }
+
+        // 4. Update powerFlow for the renderer (spec §5.9 — bar fill rate).
+        result.nodes.forEach { (pos, node) ->
+            state.factory.powerFlow[pos] = node.rpm
+        }
+
+        // 5. Apply wear and handle any expired components.
+        wearSystem.applyWear(state.factory, result, eventBus)
+    }
+
+    // -----------------------------------------------------------------------
 
     override fun onPause() {
         super.onPause()
@@ -94,13 +139,18 @@ class GameActivity : AppCompatActivity() {
         mapConfig     = MapConfig.A,
         waves         = listOf(
             WaveDefinition(
-                composition    = mapOf(UnitType.BRUTE to 3),
-                spawnInterval  = 2f,
+                composition   = mapOf(UnitType.BRUTE to 3),
+                spawnInterval = 2f,
             ),
             WaveDefinition(
-                composition    = mapOf(UnitType.BRUTE to 2, UnitType.SKIRMISHER to 2),
-                spawnInterval  = 1.5f,
+                composition   = mapOf(UnitType.BRUTE to 2, UnitType.SKIRMISHER to 2),
+                spawnInterval = 1.5f,
             ),
         ),
     )
+
+    companion object {
+        /** Minimum rate change required to post a [MachineOutputRateChangedEvent]. */
+        private const val RATE_CHANGE_EPSILON = 0.001f
+    }
 }

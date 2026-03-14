@@ -1,5 +1,6 @@
 package com.bossbuttonstudios.machinewars.core
 
+import com.bossbuttonstudios.machinewars.drivetrain.DrivetrainResult
 import com.bossbuttonstudios.machinewars.model.economy.Store
 import com.bossbuttonstudios.machinewars.model.economy.Wallet
 import com.bossbuttonstudios.machinewars.model.factory.Component
@@ -57,6 +58,16 @@ class GameState(
      * Combat systems read this each spawn tick.
      */
     val laneAssignments: MutableMap<java.util.UUID, Int> = mutableMapOf()
+
+    // --- Drivetrain (Session 2 writes here each tick) ---
+    /**
+     * Most recent drivetrain solve result. Updated by DrivetrainSolver each
+     * tick before combat or wave systems run.
+     *
+     * The press-and-hold tooltip reads from this directly (spec §5.9).
+     * Initialised to an idle (no components) result.
+     */
+    var drivetrainResult: DrivetrainResult = DrivetrainResult.idle()
 
     // --- Convenience queries ---
 
