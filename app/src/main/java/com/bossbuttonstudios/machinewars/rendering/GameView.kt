@@ -7,8 +7,10 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import java.util.UUID
 import com.bossbuttonstudios.machinewars.core.GameState
 import com.bossbuttonstudios.machinewars.interfaces.Renderer
 import com.bossbuttonstudios.machinewars.model.factory.ComponentType
@@ -99,6 +101,33 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
         color     = Color.WHITE
         textAlign = Paint.Align.CENTER
     }
+    private val laneLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color     = Color.parseColor("#FFEB3B")
+        textAlign = Paint.Align.CENTER
+    }
+
+    // Selection highlight for the currently-selected machine.
+    private val selectionPaint = stroke("#FFEB3B", 4f)
+
+    // ---- Input state --------------------------------------------------------
+
+    /** ID of the combat machine the player has tapped to select. Null = no selection. */
+    private var selectedMachineId: UUID? = null
+
+    /**
+     * Most recent state snapshot, cached on each [render] call so [onTouchEvent]
+     * can map touches to game objects without accessing GameState from two threads.
+     * Written on the game-loop thread; read on the main thread. One-tick stale at
+     * worst — acceptable for touch resolution in a single-player prototype.
+     */
+    @Volatile private var currentState: GameState? = null
+
+    /**
+     * Called when the player assigns a lane to a machine.
+     * Set by [com.bossbuttonstudios.machinewars.GameActivity] to write into
+     * [GameState.laneAssignments] and [Machine.assignedLane].
+     */
+    var onLaneAssigned: ((machineId: UUID, lane: Int) -> Unit)? = null
 
     init {
         holder.addCallback(this)
@@ -107,7 +136,44 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         layout = SceneLayout(w.toFloat(), h.toFloat())
-        layout?.let { labelPaint.textSize = it.cellSize * 0.35f }
+        layout?.let {
+            labelPaint.textSize    = it.cellSize * 0.35f
+            laneLabelPaint.textSize = it.cellSize * 0.28f
+        }
+    }
+
+    // ---- Touch handling -----------------------------------------------------
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.action != MotionEvent.ACTION_UP) return true
+        val l     = layout       ?: return true
+        val state = currentState ?: return true
+        val x = event.x
+        val y = event.y
+
+        when {
+            l.isFactoryTouch(y) -> {
+                val (col, row) = l.gridCellAt(x, y) ?: run {
+                    selectedMachineId = null; return true
+                }
+                val machine = state.factory.machineAt(col, row)
+                selectedMachineId = if (machine != null && machine.isCombatMachine) {
+                    // Tap same machine again to deselect.
+                    if (machine.id == selectedMachineId) null else machine.id
+                } else {
+                    null
+                }
+            }
+            l.isBattlefieldTouch(y) -> {
+                val sel  = selectedMachineId ?: return true
+                val lane = l.laneAt(x, y)   ?: run {
+                    selectedMachineId = null; return true
+                }
+                onLaneAssigned?.invoke(sel, lane)
+                selectedMachineId = null
+            }
+        }
+        return true
     }
 
     // ---- Renderer -----------------------------------------------------------
@@ -121,6 +187,7 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
                       else ((now - lastRenderNanos) / 1_000_000_000f).coerceAtMost(0.1f)
         lastRenderNanos = now
 
+        currentState = state
         advanceRotation(state, frameDt)
 
         val canvas = holder.lockCanvas() ?: return
@@ -329,6 +396,12 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
             rect.set(left, top, right, bottom)
             canvas.drawRect(rect, machinePaint)
 
+            // Selection highlight.
+            if (machine.id == selectedMachineId) {
+                rect.set(left - 3f, top - 3f, right + 3f, bottom + 3f)
+                canvas.drawRect(rect, selectionPaint)
+            }
+
             // Output rate bar at the bottom of the machine face (spec §5.9).
             val barTop    = bottom - barH - pad * 0.5f
             val barBottom = bottom - pad * 0.5f
@@ -340,8 +413,25 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
             rect.set(left, barTop, left + (right - left) * fraction, barBottom)
             canvas.drawRect(rect, machineBarPaint)
 
+            // Machine type abbreviation.
             val labelCy = top + (barTop - top) / 2f + labelPaint.textSize * 0.38f
             canvas.drawText(machineLabel(machine.type), (left + right) / 2f, labelCy, labelPaint)
+
+            // Lane assignment indicator — top-right corner of machine face.
+            if (machine.isCombatMachine) {
+                val laneLabel = when (machine.assignedLane) {
+                    0    -> "L"
+                    1    -> "C"
+                    2    -> "R"
+                    else -> "-"
+                }
+                canvas.drawText(
+                    laneLabel,
+                    right - laneLabelPaint.textSize * 0.7f,
+                    top   + laneLabelPaint.textSize,
+                    laneLabelPaint,
+                )
+            }
         }
     }
 

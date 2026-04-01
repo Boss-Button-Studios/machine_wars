@@ -107,6 +107,41 @@ class SceneLayout(
     /** Y at the centre of factory grid [row] (0-indexed). */
     fun cellCenterY(row: Int): Float = factoryOffsetY + row * cellSize + cellSize * 0.5f
 
+    // ---- Reverse coordinate mapping (touch → game space) -------------------
+
+    /** True when a touch at screen Y [y] falls inside the battlefield. */
+    fun isBattlefieldTouch(y: Float): Boolean = y < battlefieldBottom
+
+    /** True when a touch at screen Y [y] falls inside the factory grid area. */
+    fun isFactoryTouch(y: Float): Boolean = y >= battlefieldBottom
+
+    /**
+     * Returns the lane (0 = left, 1 = centre, 2 = right) for a touch at ([x], [y]).
+     * Returns null if the touch is outside the battlefield.
+     */
+    fun laneAt(x: Float, y: Float): Int? {
+        if (!isBattlefieldTouch(y)) return null
+        return when {
+            x < leftBoundaryX  -> 0
+            x < rightBoundaryX -> 1
+            x <= screenWidth   -> 2
+            else               -> null
+        }
+    }
+
+    /**
+     * Returns the factory grid cell (col, row) for a touch at ([x], [y]).
+     * Returns null if the touch is outside the factory grid bounds.
+     */
+    fun gridCellAt(x: Float, y: Float): Pair<Int, Int>? {
+        if (!isFactoryTouch(y)) return null
+        val col = ((x - factoryOffsetX) / cellSize).toInt()
+        val row = ((y - factoryOffsetY) / cellSize).toInt()
+        if (col < 0 || col >= FactoryGrid.COLS) return null
+        if (row < 0 || row >= FactoryGrid.ROWS) return null
+        return col to row
+    }
+
     companion object {
         /** Fraction of screen height dedicated to the battlefield. */
         const val BATTLEFIELD_FRACTION = 0.70f

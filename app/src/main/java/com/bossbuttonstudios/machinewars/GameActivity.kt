@@ -14,6 +14,11 @@ import com.bossbuttonstudios.machinewars.interfaces.NoOpAdProvider
 import com.bossbuttonstudios.machinewars.rendering.GameView
 import com.bossbuttonstudios.machinewars.model.economy.Wallet
 import com.bossbuttonstudios.machinewars.model.factory.FactoryGrid
+import com.bossbuttonstudios.machinewars.model.factory.BeltConnection
+import com.bossbuttonstudios.machinewars.model.factory.Component
+import com.bossbuttonstudios.machinewars.model.factory.ComponentType
+import com.bossbuttonstudios.machinewars.model.factory.Machine
+import com.bossbuttonstudios.machinewars.model.factory.MachineType
 import com.bossbuttonstudios.machinewars.model.map.MapConfig
 import com.bossbuttonstudios.machinewars.model.mission.MissionConfig
 import com.bossbuttonstudios.machinewars.model.mission.MissionType
@@ -54,11 +59,27 @@ class GameActivity : AppCompatActivity() {
         eventBus = EventBus()
 
         val mission = buildSampleMission()
-        val factory = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = emptyList())
+        val factory = FactoryGrid(
+            motorGridX = 0,
+            motorGridY = 0,
+            machines = listOf(
+                Machine(type = MachineType.COMBAT_BRUTE,      gridX = 2, gridY = 0),
+                Machine(type = MachineType.COMBAT_SKIRMISHER, gridX = 4, gridY = 0),
+                Machine(type = MachineType.COMBAT_ARTILLERY,  gridX = 2, gridY = 2),
+                Machine(type = MachineType.MINER,             gridX = 4, gridY = 2),
+            ),
+        )
         val state   = GameState(mission = mission, factory = factory, wallet = Wallet(initialOre = 50))
 
         gameView = GameView(this)
         setContentView(gameView)
+
+        placeSampleDrivetrain(factory)
+
+        gameView.onLaneAssigned = { machineId, lane ->
+            state.laneAssignments[machineId] = lane
+            state.factory.machines.find { it.id == machineId }?.assignedLane = lane
+        }
 
         @Suppress("UNUSED_VARIABLE") val adProvider = NoOpAdProvider() // wired in a later session
 
@@ -135,6 +156,39 @@ class GameActivity : AppCompatActivity() {
     }
 
     // -----------------------------------------------------------------------
+
+    /**
+     * Populates the factory grid with a sample drivetrain that exercises all
+     * component types and shows three machines running at their preferred RPMs.
+     *
+     * Network layout (6×4 grid, motor at 0,0):
+     *
+     *   [M]  [G8] [BRT]  ...  [GP2][SKR]
+     *   [G4] [G2] [G4]   ...
+     *   [GP2]... (belt)  ...
+     *   ...               ... [ART] ...  [MNR unconnected]
+     *
+     * Chains:
+     *   Motor → GEAR(8)(1,0) → BRT(2,0)          50 RPM  (BRT preferred 50)
+     *   Motor → GEAR(4)(0,1) → GEAR(2)(1,1)
+     *                        → GEAR(4)(2,1) → ART(2,2)   100 RPM (ART preferred 100)
+     *                        → GP(2)(0,2)   → [belt] → GP(2)(3,0) → SKR(4,0)  200 RPM (SKR preferred 200)
+     *   MNR(4,2) — deliberately unconnected, output = 0.
+     */
+    private fun placeSampleDrivetrain(factory: FactoryGrid) {
+        // Chain 1: motor → BRT (step-down to 50 RPM)
+        factory.place(Component(type = ComponentType.GEAR, size = 8), 1, 0)
+
+        // Chain 2: motor → ART (100 RPM via up/down gear pair)
+        factory.place(Component(type = ComponentType.GEAR,        size = 4), 0, 1)
+        factory.place(Component(type = ComponentType.GEAR,        size = 2), 1, 1)
+        factory.place(Component(type = ComponentType.GEAR,        size = 4), 2, 1)
+
+        // Chain 3: branch from (0,1) → belt → SKR (200 RPM)
+        factory.place(Component(type = ComponentType.GEAR_PULLEY, size = 2), 0, 2)
+        factory.place(Component(type = ComponentType.GEAR_PULLEY, size = 2), 3, 0)
+        factory.addBelt(BeltConnection(fromX = 0, fromY = 2, toX = 3, toY = 0))
+    }
 
     private fun buildSampleMission(): MissionConfig = MissionConfig(
         missionNumber = 1,

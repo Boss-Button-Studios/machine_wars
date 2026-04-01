@@ -1,6 +1,7 @@
 package com.bossbuttonstudios.machinewars.core
 
 import com.bossbuttonstudios.machinewars.drivetrain.DrivetrainResult
+import java.util.concurrent.ConcurrentHashMap
 import com.bossbuttonstudios.machinewars.model.economy.Store
 import com.bossbuttonstudios.machinewars.model.economy.Wallet
 import com.bossbuttonstudios.machinewars.model.factory.Component
@@ -56,8 +57,12 @@ class GameState(
     /**
      * Maps machine ID to the lane the player has assigned it to.
      * Combat systems read this each spawn tick.
+     *
+     * ConcurrentHashMap: written on the main (UI) thread via touch input,
+     * read on the game-loop coroutine thread. No lock needed for prototype
+     * single-player use; worst case is a one-tick stale read.
      */
-    val laneAssignments: MutableMap<java.util.UUID, Int> = mutableMapOf()
+    val laneAssignments: MutableMap<java.util.UUID, Int> = ConcurrentHashMap()
 
     // --- Drivetrain (Session 2 writes here each tick) ---
     /**

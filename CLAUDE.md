@@ -161,7 +161,16 @@ Also inspect installed APK permissions with `aapt dump permissions app-release.a
 
 ## 7. Session Workflow Expectations
 
-**Sessions are incremental and cumulative.** Development is organized into sessions (Session 1: scaffolding, Session 2: drivetrain, Session 3: combat). Each session builds on the last. Read the git log to understand what has been done. Read the spec to understand what comes next before asking.
+**Sessions are incremental and cumulative.** The session plan is:
+
+- Session 1: Core scaffolding — complete
+- Session 2: Drivetrain simulation — complete
+- Session 3: Combat and unit AI — complete
+- Session 4: Rendering layer — complete
+- Session 5: Input handling — lane assignment only (tap machine to select, tap lane to assign)
+- Session 6: Wave management, store, and factory grid touch (tap to place components, drag to route belts)
+
+**Why factory grid touch is in Session 6, not Session 5:** Placing components requires an inventory, which doesn't exist until the store is built. Building factory grid touch in Session 5 would mean a UI with nothing to put in it. This was an explicit decision made on 2026-04-01.
 
 **Read before writing.** Do not propose changes to code you haven't read. Do not suggest modifications to a system without understanding how it interacts with `GameState` and `EventBus`.
 
