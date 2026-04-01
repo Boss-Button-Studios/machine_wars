@@ -19,8 +19,8 @@ class FactoryGrid(
     val machines: List<Machine>,
 ) {
     companion object {
-        const val COLS = 4
-        const val ROWS = 6
+        const val COLS = 6
+        const val ROWS = 4
     }
 
     // Sparse maps so empty cells cost nothing.

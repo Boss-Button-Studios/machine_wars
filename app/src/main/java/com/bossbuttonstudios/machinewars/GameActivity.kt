@@ -11,7 +11,7 @@ import com.bossbuttonstudios.machinewars.core.OreChangedEvent
 import com.bossbuttonstudios.machinewars.drivetrain.DrivetrainSolver
 import com.bossbuttonstudios.machinewars.drivetrain.WearSystem
 import com.bossbuttonstudios.machinewars.interfaces.NoOpAdProvider
-import com.bossbuttonstudios.machinewars.interfaces.NoOpRenderer
+import com.bossbuttonstudios.machinewars.rendering.GameView
 import com.bossbuttonstudios.machinewars.model.economy.Wallet
 import com.bossbuttonstudios.machinewars.model.factory.FactoryGrid
 import com.bossbuttonstudios.machinewars.model.map.MapConfig
@@ -41,6 +41,7 @@ class GameActivity : AppCompatActivity() {
 
     private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var gameLoop: GameLoop
+    private lateinit var gameView: GameView
     private lateinit var eventBus: EventBus
 
     // Session 2 systems
@@ -56,18 +57,20 @@ class GameActivity : AppCompatActivity() {
         val factory = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = emptyList())
         val state   = GameState(mission = mission, factory = factory, wallet = Wallet(initialOre = 50))
 
-        val renderer   = NoOpRenderer()
-        @Suppress("UNUSED_VARIABLE") val adProvider = NoOpAdProvider() // wired in Session 4
+        gameView = GameView(this)
+        setContentView(gameView)
+
+        @Suppress("UNUSED_VARIABLE") val adProvider = NoOpAdProvider() // wired in a later session
 
         // Subscribe to mission-end events to handle win/loss UI (stub).
         eventBus.on<MissionEndedEvent> { _ ->
-            // TODO Session 4+: show result screen
+            // TODO: show result screen overlay
         }
 
         gameLoop = GameLoop(
             scope    = activityScope,
             state    = state,
-            renderer = renderer,
+            renderer = gameView,
             onTick   = { dt, s ->
                 tickDrivetrain(dt, s)
                 s.elapsedSeconds += dt

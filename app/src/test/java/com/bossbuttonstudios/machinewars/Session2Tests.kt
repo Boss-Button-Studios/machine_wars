@@ -182,11 +182,11 @@ class DrivetrainSolverGearRatioTest {
     }
 
     @Test fun `disconnected gear has no node in result`() {
-        // Gear at (3, 5) — far corner, not adjacent to motor or any connected gear.
+        // Gear at (5, 3) — far corner, not adjacent to motor or any connected gear.
         val g = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = emptyList())
-        g.place(Component(type = ComponentType.GEAR, size = 4), 3, 5)
+        g.place(Component(type = ComponentType.GEAR, size = 4), 5, 3)
         val result = solver.solve(g, dt)
-        assertNull(result.nodes[3 to 5])
+        assertNull(result.nodes[5 to 3])
     }
 }
 
@@ -285,8 +285,8 @@ class DrivetrainSolverMachineOutputTest {
     }
 
     @Test fun `isolated machine with no path from motor produces zero output`() {
-        // Machine at (3, 5) with no connected components.
-        val machine = Machine(type = MachineType.MINER, gridX = 3, gridY = 5)
+        // Machine at (5, 3) with no connected components.
+        val machine = Machine(type = MachineType.MINER, gridX = 5, gridY = 3)
         val g = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = listOf(machine))
         val result = solver.solve(g, dt)
         val rate = result.machineOutputRates[machine.id]
@@ -366,10 +366,10 @@ class DrivetrainSolverBeltTest {
     @Test fun `very long belt is floored at minimum efficiency`() {
         // Length 100 → raw efficiency = 1 - 100*0.05 = -4.0 → floored at 0.10
         val g = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = emptyList())
-        g.place(Component(type = ComponentType.PULLEY, size = 4), 3, 5)
-        g.addBelt(BeltConnection(fromX = 0, fromY = 0, toX = 3, toY = 5, length = 100f))
+        g.place(Component(type = ComponentType.PULLEY, size = 4), 5, 3)
+        g.addBelt(BeltConnection(fromX = 0, fromY = 0, toX = 5, toY = 3, length = 100f))
         val result = solver.solve(g, dt)
-        val node = result.nodes[3 to 5]
+        val node = result.nodes[5 to 3]
         assertNotNull(node)
         assertEquals(DrivetrainSolver.BELT_MIN_EFFICIENCY, node!!.pathEfficiency, 0.001f)
     }
@@ -575,9 +575,9 @@ class DrivetrainSolverWearTest {
 
     @Test fun `disconnected component accumulates no wear`() {
         val g = FactoryGrid(motorGridX = 0, motorGridY = 0, machines = emptyList())
-        g.place(Component(type = ComponentType.GEAR, size = 4, wearPct = 0f), 3, 5)
+        g.place(Component(type = ComponentType.GEAR, size = 4, wearPct = 0f), 5, 3)
         val result = solver.solve(g, dt = 1f)
-        assertNull("Disconnected component should have no node", result.nodes[3 to 5])
+        assertNull("Disconnected component should have no node", result.nodes[5 to 3])
     }
 
     @Test fun `motor itself accumulates no wear`() {
