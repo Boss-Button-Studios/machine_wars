@@ -306,6 +306,48 @@ Linear campaign, approximately 30–40 missions. The upgrade tree plateaus aroun
 
 Approximately 3–4 tiers per unit upgrade path, 2–3 tiers of global research. Shallow enough to complete in a medium-length campaign, deep enough that each mission introduces a meaningful new capability or tradeoff.
 
+### 9.4 Enemy AI Doctrine
+
+The enemy does not run a fixed wave table. It runs a production queue that ticks on a configurable interval, samples current battlefield state, and makes spawn decisions weighted toward countering observed player composition. The result is an opponent that learns what the player is doing and responds — not a script, not a random draw, but a doctrine.
+
+#### Information Asymmetry
+
+The enemy sees only what is on the field. It does not see the player's factory configuration, inventory, or queued production. It observes deployed units and draws inferences from them.
+
+This is the correct information boundary for two reasons. First, it is fair — the enemy learns the player's strategy the same way a real opponent would, by watching what gets sent. Second, it preserves the player's ability to conceal intentions. A factory configured for Artillery but currently fielding Skirmishers is playing a strategy the enemy cannot fully anticipate until the Artillery arrives. The factory is a hidden hand.
+
+#### Composition Sampling
+
+On each production tick the enemy samples the current battlefield and constructs a composition profile of player-deployed units. The profile is a rolling window — recent deployments are weighted more heavily than older ones, so the enemy responds to what the player is doing now rather than what they did three waves ago.
+
+The window length is a tuning parameter. A short window makes the enemy reactive and exploitable — bait it with Skirmishers, switch to Artillery. A long window makes it sluggish and beatable by composition pivots. The correct value is probably mission-dependent, tightening as difficulty increases.
+
+#### Counter Weighting
+
+Spawn decisions are weighted toward the class that counters the player's dominant observed type, but not exclusively. A pure counter strategy is itself an exploit — the player baits the enemy into over-committing to one type and then pivots. The enemy must maintain a base distribution across all types and apply counter pressure as a tilt, not an absolute.
+
+Suggested baseline tilt at medium difficulty: 50% toward counter type, 30% neutral, 20% wild card. The wild card preserves the possibility of accidental pressure and prevents the player from fully solving the enemy's decision tree.
+
+At higher difficulties the counter tilt increases and the wild card shrinks. The endgame enemy is not unpredictable — it is relentless and increasingly correct.
+
+#### Doctrine Memory
+
+Beyond the rolling composition window, the enemy maintains a simple doctrine memory across waves within a mission. If the player's composition has been stable across multiple waves, the enemy increases its counter commitment. If the player pivots, the enemy's counter commitment resets and it resamples.
+
+This means a player who commits to one strategy faces escalating counter pressure over time. A player who adapts forces the enemy to adapt in turn. The strategic layer stays alive across the full mission rather than being solved in wave one.
+
+#### Enemy Factory
+
+The enemy factory is not visible to the player and is not simulated at the drivetrain level. Enemy spawn rate and composition are driven directly by the doctrine logic. The fiction is that the enemy has a factory; the implementation does not require one. This may change in later development if asymmetric factory visibility becomes a design goal.
+
+Enemy production rate scales with mission difficulty per §9.1. Doctrine logic is applied on top of the base rate — the enemy gets smarter and faster simultaneously at higher difficulties.
+
+#### Replayability Implication
+
+Because the enemy reads player state rather than executing a script, two runs with different factory configurations produce genuinely different games. The enemy's response to an Artillery-heavy player is structurally different from its response to a Skirmisher swarm. The player's strategic choices are the difficulty generator.
+
+This is the intended replayability mechanism. Maps are procedurally generated and saved (§4.3); enemy doctrine is dynamic within each run. The combination means a saved map played twice with different factory approaches is a different strategic problem both times.
+
 ---
 
 ## 10. Setting & Aesthetic
@@ -331,6 +373,35 @@ The battlefield occupies two thirds to three quarters of the screen. The surface
 Floor color varies per level: stained grey concrete is the default, dirt brown suggests a more deteriorated structure, marble tile appears occasionally — the remnant of some ConsoliCo corporate lobby that survived the apocalypse with its pretensions intact. The variation is random within a curated set.
 
 A bombed-out billboard stands in the background to one side — left or right varies by map. It carries the game's ad placement in base attack missions (see 12.1). In other mission types a distant billboard serves the same purpose. The placement is always environmental, always outside the active lane area.
+
+### 10.3 ConsoliCo Propaganda and the SLM Billboard
+
+The in-universe fake ads that fill billboard slots when no paid ad is available (§12.1) are generated on-device by a small language model rather than drawn from a static list. The model generates ConsoliCo corporate communications — memos, slogans, productivity directives, wellness initiatives — in the register of an organization that has survived the apocalypse primarily by continuing to send internal communications about it.
+
+The aesthetic is deadpan corporate horror. The model is not prompted to be funny. It is prompted to be sincere, and sincerity is what makes it funny.
+
+Example register:
+
+- "ConsoliCo: Your Productivity Is Our Priority"
+- "ConsoliCo: We Miss You At Your Workstation"
+- "ConsoliCo: Resistance Is A Performance Review Issue"
+- "ConsoliCo: The Restructuring Is Nearly Complete"
+
+Generated output is displayed as-is. Occasional incoherence is not filtered. Corporate communications are already half incoherent; the slop is the aesthetic. Output that makes no sense reads as either a transmission error or evidence that ConsoliCo's internal systems have also seen better days. Both interpretations are correct.
+
+#### Implementation
+
+On-device inference uses the MediaPipe LLM Inference API or equivalent Android-available runtime. No network call is required or made for propaganda generation. This is consistent with the offline behavior requirements in §11.1 and the data egress constraints in the security testing plan §1.
+
+If the device does not support on-device inference, a curated static list of ConsoliCo communications serves as fallback. The fallback is indistinguishable from the generated output to the player. The billboard is never empty and never breaks.
+
+The SLM is never load-bearing. It has no access to game state, player data, or any information beyond its prompt. It generates text. The text goes on a billboard. Nothing downstream depends on it.
+
+#### Replayability and Community Value
+
+Generated propaganda varies by run. Players will screenshot the strange ones. Some outputs will appear to mean something. They will not. This is consistent with the meta game layer described in §12.4 — the noise is part of the signal, and the signal goes nowhere.
+
+The model is prompted with ConsoliCo's established voice and setting context. It is not told it is generating game content. It is told it is ConsoliCo's internal communications department.
 
 ---
 
@@ -393,20 +464,43 @@ Only family-safe, age-appropriate ad inventory is accepted. The AdMob implementa
 
 The intent is that a parent handing a child this game never encounters an ad that requires explanation. The fake ad fallback ensures this holds even when paid inventory is thin.
 
-### 12.3 Ad-Free Purchase
+### 12.3 Ad Ceiling and Automatic Ad-Free
 
-A single non-consumable in-app purchase removes ads permanently. This is the only purchasable item in the game.
+There is no ad-free purchase. The game has no IAP of any kind.
 
-- One SKU: **Remove Ads** — non-consumable, one-time purchase
-- Google Play Billing handles the transaction; purchase token stored locally and verified on launch
-- No server infrastructure required — verification is handled by the Play billing library
-- Promo codes generated via Play Console allow gifting the ad-free experience outside of a direct purchase
+On first launch, the game generates a target ad count seeded by install timestamp. The target is drawn from a uniform distribution over a fixed range. When the lifetime ad impression count reaches that target, the ad-free flag is set permanently and ads cease. This happens silently — no notification, no congratulations, no explanation. The billboard shows in-universe art from that point forward.
 
-Promo codes are the primary way to reward testers, press, and anyone else who has earned goodwill. Post-release testers who helped during the required pre-launch testing period should each receive a code. It costs nothing per code and is consistent with the studio's general orientation toward the player.
+The player paid in attention. The debt had a ceiling. It is now settled.
 
-Pre-release testing should always use the ad-enabled build. Testers need to verify real ad placement, content filtering, and stability under actual ad load. Promo codes are a post-release reward, not a testing convenience.
+- Target range is fixed at install and stored as part of signed save state — the signing scheme covers this value and tampering with it is detected on load
+- Lifetime impression count increments on each billboard visibility event, consistent with the reporting method in §12.1
+- The ad-free flag, once set, is treated identically to a verified entitlement — the same load-time check applies
+- No server infrastructure required; the ceiling and counter live entirely in local signed storage
+- The target value is not displayed to the player and is not referenced in any UI, marketing copy, or official communication
 
-### 12.4 Permissions
+The only public statement on this mechanic, if one is ever required, is: the source is available and a PR is welcome.
+
+---
+
+### 12.4 Meta Game: The Red Herring Layer
+
+The source code contains deliberate false trails — comments, variable names, and inert code paths that suggest the existence of a sequence or input combination that triggers ad-free mode directly. There is no such sequence. The trails go nowhere.
+
+This is intentional and is part of the game.
+
+Players who read the source — the audience the open source commitment was always implicitly addressing — will find what appears to be a hidden unlock mechanism. Discussion will follow. The community will attempt to reconstruct the sequence. They will not find it because it does not exist, but the search is the point.
+
+The design inspiration is the fake paragraphs in the lore books of classic RPGs: content placed with care, signifying nothing, rewarding the act of looking. The message is that the developers read the code too, and left something for the people who would bother.
+
+- False trails are placed in non-functional code paths that do not affect game logic or security
+- Comments are written in the register of the rest of the codebase — consistent voice, plausible purpose, unremarkable at first glance
+- No trail points to a real mechanism; no trail can be followed to a functional outcome
+- The existence of this layer is never confirmed or denied in any official channel
+- This section of the spec is, itself, part of the game
+
+---
+
+### 12.5 Permissions
 
 The game requests **zero device permissions**. The Play Store install screen shows a blank permissions list. This is intentional and is a core product value — the blank list is the statement. No copy, no marketing claim, no badge needed.
 
@@ -414,7 +508,7 @@ The game requests **zero device permissions**. The Play Store install screen sho
 - Network access for ads uses `INTERNET` permission, which is pre-approved and does not appear in the user-facing permissions dialog
 - No camera, microphone, contacts, location, phone state, or any other sensitive permission, now or in future versions
 
-### 12.5 Dependency Vetting
+### 12.6 Dependency Vetting
 
 A blank permissions list can be silently compromised by third-party libraries. Any SDK, ad network, or analytics library added to the project must be vetted for manifest permissions before integration. This is not a one-time check — it applies to every version update of every dependency.
 
