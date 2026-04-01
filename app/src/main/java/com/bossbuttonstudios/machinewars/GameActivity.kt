@@ -8,6 +8,9 @@ import com.bossbuttonstudios.machinewars.core.GameState
 import com.bossbuttonstudios.machinewars.core.MachineOutputRateChangedEvent
 import com.bossbuttonstudios.machinewars.core.MissionEndedEvent
 import com.bossbuttonstudios.machinewars.core.OreChangedEvent
+import com.bossbuttonstudios.machinewars.combat.CombatOrchestrator
+import com.bossbuttonstudios.machinewars.combat.WaveManager
+import com.bossbuttonstudios.machinewars.core.WaveClearedEvent
 import com.bossbuttonstudios.machinewars.drivetrain.DrivetrainSolver
 import com.bossbuttonstudios.machinewars.drivetrain.WearSystem
 import com.bossbuttonstudios.machinewars.interfaces.NoOpAdProvider
@@ -53,6 +56,10 @@ class GameActivity : AppCompatActivity() {
     private val drivetrainSolver = DrivetrainSolver()
     private val wearSystem       = WearSystem()
 
+    // Session 6 systems
+    private val waveManager        = WaveManager()
+    private val combatOrchestrator = CombatOrchestrator()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -81,6 +88,30 @@ class GameActivity : AppCompatActivity() {
             state.factory.machines.find { it.id == machineId }?.assignedLane = lane
         }
 
+        gameView.onStorePurchase = purchase@{ index ->
+            val component = state.store.purchase(index, state.wallet) ?: return@purchase
+            state.playerInventory.add(component)
+            eventBus.post(OreChangedEvent(state.wallet.ore))
+        }
+
+        gameView.onComponentPlace = place@{ inventoryIndex, col, row ->
+            val component = state.playerInventory.getOrNull(inventoryIndex) ?: return@place
+            if (state.factory.place(component, col, row)) {
+                state.playerInventory.removeAt(inventoryIndex)
+            }
+        }
+
+        gameView.onBeltAdded = { fromX, fromY, toX, toY ->
+            state.factory.addBelt(BeltConnection(fromX = fromX, fromY = fromY, toX = toX, toY = toY))
+        }
+
+        gameView.onContinueWave = {
+            state.currentWaveIndex++
+            state.waveSpawnCursor = 0
+            state.timeUntilNextSpawn = 0f
+            state.betweenWaves = false
+        }
+
         @Suppress("UNUSED_VARIABLE") val adProvider = NoOpAdProvider() // wired in a later session
 
         // Subscribe to mission-end events to handle win/loss UI (stub).
@@ -88,16 +119,23 @@ class GameActivity : AppCompatActivity() {
             // TODO: show result screen overlay
         }
 
+        // WaveManager posts WaveClearedEvent; the between-waves UI is driven by
+        // state.betweenWaves rather than by this event, but we subscribe here
+        // for any future logging or animation hooks.
+        eventBus.on<WaveClearedEvent> { _ -> }
+
         gameLoop = GameLoop(
             scope    = activityScope,
             state    = state,
             renderer = gameView,
             onTick   = { dt, s ->
-                tickDrivetrain(dt, s)
-                s.elapsedSeconds += dt
-                eventBus.post(OreChangedEvent(s.wallet.ore))
-                // Session 3: combat system tick goes here
-                // Session 6: wave management tick goes here
+                if (!s.isOver) {
+                    tickDrivetrain(dt, s)
+                    waveManager.tick(dt, s, eventBus)
+                    combatOrchestrator.onTick(dt, s)
+                    // CombatOrchestrator increments elapsedSeconds and posts MissionEndedEvent.
+                    // OreChangedEvent is posted by WaveManager on each miner tick.
+                }
             },
         )
 

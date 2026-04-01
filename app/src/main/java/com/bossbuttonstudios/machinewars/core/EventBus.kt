@@ -50,8 +50,11 @@ data class UnitDestroyedEvent(
     val position: Float,
 )
 
-/** A wave has been fully spawned. */
+/** A wave has been fully spawned (last unit queued). */
 data class WaveSpawnedEvent(val waveIndex: Int)
+
+/** A wave has been fully cleared (all spawned enemies destroyed). */
+data class WaveClearedEvent(val waveIndex: Int)
 
 /** The player's ore total changed. */
 data class OreChangedEvent(val newTotal: Int)

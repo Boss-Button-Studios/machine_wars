@@ -13,6 +13,7 @@ import android.view.SurfaceView
 import java.util.UUID
 import com.bossbuttonstudios.machinewars.core.GameState
 import com.bossbuttonstudios.machinewars.interfaces.Renderer
+import com.bossbuttonstudios.machinewars.model.factory.Component
 import com.bossbuttonstudios.machinewars.model.factory.ComponentType
 import com.bossbuttonstudios.machinewars.model.factory.FactoryGrid
 import com.bossbuttonstudios.machinewars.model.factory.MachineRegistry
@@ -106,13 +107,45 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
         textAlign = Paint.Align.CENTER
     }
 
-    // Selection highlight for the currently-selected machine.
+    // Selection highlight for the currently-selected machine or inventory item.
     private val selectionPaint = stroke("#FFEB3B", 4f)
+
+    // Store overlay
+    private val overlayBgPaint      = solid("#000000").also { it.alpha = 210 }
+    private val overlayTitlePaint   = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color     = Color.WHITE
+        textAlign = Paint.Align.CENTER
+    }
+    private val overlayItemPaint    = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color     = Color.parseColor("#CCCCCC")
+        textAlign = Paint.Align.LEFT
+    }
+    private val buyButtonPaint      = solid("#388E3C")
+    private val buyButtonTextPaint  = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color     = Color.WHITE
+        textAlign = Paint.Align.CENTER
+    }
+    private val continueButtonPaint = solid("#1565C0")
+    private val invItemBgPaint      = solid("#263238")
+    private val invItemSelPaint     = solid("#1A237E")
 
     // ---- Input state --------------------------------------------------------
 
     /** ID of the combat machine the player has tapped to select. Null = no selection. */
     private var selectedMachineId: UUID? = null
+
+    /**
+     * Index into [GameState.playerInventory] for the component awaiting placement.
+     * -1 means no item selected. Set when the player taps an inventory item in the
+     * between-wave store overlay; cleared after placement or NEXT WAVE.
+     */
+    private var selectedInventoryIndex: Int = -1
+
+    /**
+     * Factory grid cell where a belt drag began (ACTION_DOWN on a pulley or
+     * gear-pulley cell). Null when no drag is in progress.
+     */
+    private var beltDragStartCell: Pair<Int, Int>? = null
 
     /**
      * Most recent state snapshot, cached on each [render] call so [onTouchEvent]
@@ -129,6 +162,21 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
      */
     var onLaneAssigned: ((machineId: UUID, lane: Int) -> Unit)? = null
 
+    /** Called when the player taps BUY on a store item (index into current rotation). */
+    var onStorePurchase: ((index: Int) -> Unit)? = null
+
+    /** Called when the player places a selected inventory item on the factory grid. */
+    var onComponentPlace: ((inventoryIndex: Int, col: Int, row: Int) -> Unit)? = null
+
+    /**
+     * Called when the player completes a belt drag from one pulley/gear-pulley/motor
+     * cell to another.
+     */
+    var onBeltAdded: ((fromX: Int, fromY: Int, toX: Int, toY: Int) -> Unit)? = null
+
+    /** Called when the player taps NEXT WAVE to exit the between-wave store. */
+    var onContinueWave: (() -> Unit)? = null
+
     init {
         holder.addCallback(this)
     }
@@ -137,43 +185,143 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
         super.onSizeChanged(w, h, oldw, oldh)
         layout = SceneLayout(w.toFloat(), h.toFloat())
         layout?.let {
-            labelPaint.textSize    = it.cellSize * 0.35f
-            laneLabelPaint.textSize = it.cellSize * 0.28f
+            labelPaint.textSize         = it.cellSize * 0.35f
+            laneLabelPaint.textSize     = it.cellSize * 0.28f
+            overlayTitlePaint.textSize  = it.cellSize * 0.52f
+            overlayItemPaint.textSize   = it.cellSize * 0.38f
+            buyButtonTextPaint.textSize = it.cellSize * 0.38f
         }
     }
 
     // ---- Touch handling -----------------------------------------------------
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action != MotionEvent.ACTION_UP) return true
         val l     = layout       ?: return true
         val state = currentState ?: return true
         val x = event.x
         val y = event.y
 
-        when {
-            l.isFactoryTouch(y) -> {
-                val (col, row) = l.gridCellAt(x, y) ?: run {
-                    selectedMachineId = null; return true
-                }
-                val machine = state.factory.machineAt(col, row)
-                selectedMachineId = if (machine != null && machine.isCombatMachine) {
-                    // Tap same machine again to deselect.
-                    if (machine.id == selectedMachineId) null else machine.id
-                } else {
-                    null
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                // Record belt-drag start when the player presses on a belt endpoint.
+                if (l.isFactoryTouch(y) && !state.betweenWaves) {
+                    val cell = l.gridCellAt(x, y)
+                    if (cell != null && isBeltEndpoint(cell.first, cell.second, state)) {
+                        beltDragStartCell = cell
+                    }
                 }
             }
-            l.isBattlefieldTouch(y) -> {
-                val sel  = selectedMachineId ?: return true
-                val lane = l.laneAt(x, y)   ?: run {
-                    selectedMachineId = null; return true
+            MotionEvent.ACTION_UP -> {
+                val dragStart = beltDragStartCell
+                beltDragStartCell = null
+
+                when {
+                    // ---- Between-wave overlay (battlefield area) ------------------
+                    state.betweenWaves && l.isBattlefieldTouch(y) -> {
+                        handleOverlayTouch(x, y, state, l)
+                    }
+
+                    // ---- Belt routing: drag completed in factory area -------------
+                    dragStart != null && l.isFactoryTouch(y) -> {
+                        val endCell = l.gridCellAt(x, y)
+                        if (endCell != null && endCell != dragStart &&
+                            isBeltEndpoint(endCell.first, endCell.second, state)
+                        ) {
+                            onBeltAdded?.invoke(
+                                dragStart.first, dragStart.second,
+                                endCell.first,   endCell.second,
+                            )
+                        }
+                        // If drag ended on same cell or invalid target, fall through
+                        // to factory touch so it acts as a tap.
+                        if (endCell == dragStart || endCell == null) {
+                            handleFactoryTouch(x, y, state, l)
+                        }
+                    }
+
+                    // ---- Factory grid tap ----------------------------------------
+                    l.isFactoryTouch(y) -> handleFactoryTouch(x, y, state, l)
+
+                    // ---- Battlefield tap (lane assignment) -----------------------
+                    l.isBattlefieldTouch(y) -> {
+                        val sel  = selectedMachineId ?: return true
+                        val lane = l.laneAt(x, y)   ?: run {
+                            selectedMachineId = null; return true
+                        }
+                        onLaneAssigned?.invoke(sel, lane)
+                        selectedMachineId = null
+                    }
                 }
-                onLaneAssigned?.invoke(sel, lane)
-                selectedMachineId = null
             }
         }
         return true
+    }
+
+    private fun handleFactoryTouch(x: Float, y: Float, state: GameState, l: SceneLayout) {
+        val cell = l.gridCellAt(x, y) ?: run {
+            selectedMachineId    = null
+            selectedInventoryIndex = -1
+            return
+        }
+        val (col, row) = cell
+        val machine = state.factory.machineAt(col, row)
+
+        when {
+            // Place selected inventory item on empty cell.
+            selectedInventoryIndex >= 0 && !state.factory.isCellOccupied(col, row) -> {
+                onComponentPlace?.invoke(selectedInventoryIndex, col, row)
+                selectedInventoryIndex = -1
+            }
+            // Select / deselect a combat machine.
+            machine != null && machine.isCombatMachine -> {
+                selectedMachineId = if (machine.id == selectedMachineId) null else machine.id
+            }
+            else -> {
+                selectedMachineId      = null
+                selectedInventoryIndex = -1
+            }
+        }
+    }
+
+    private fun handleOverlayTouch(x: Float, y: Float, state: GameState, l: SceneLayout) {
+        val bb   = l.battlefieldBottom
+        val sw   = l.screenWidth
+        val rowH = bb * OVERLAY_ROW_H
+
+        // Store item BUY buttons.
+        for (i in 0 until 3) {
+            val rowTop = bb * OVERLAY_STORE_ROW_TOPS[i]
+            if (y in rowTop..(rowTop + rowH) && x >= sw * OVERLAY_BUY_X_FRAC) {
+                onStorePurchase?.invoke(i)
+                return
+            }
+        }
+
+        // Inventory item selection.
+        val invTop = bb * OVERLAY_INV_ROW_TOP
+        val invH   = bb * OVERLAY_ROW_H
+        val inv    = state.playerInventory
+        if (y in invTop..(invTop + invH) && inv.isNotEmpty()) {
+            val itemW = sw / inv.size.coerceAtLeast(1).toFloat()
+            val idx   = (x / itemW).toInt().coerceIn(0, inv.size - 1)
+            selectedInventoryIndex = if (selectedInventoryIndex == idx) -1 else idx
+            return
+        }
+
+        // NEXT WAVE button.
+        val contTop  = bb * OVERLAY_CONT_TOP
+        val contBott = bb * OVERLAY_CONT_BOTTOM
+        if (y in contTop..contBott && x in sw * 0.25f..sw * 0.75f) {
+            selectedInventoryIndex = -1
+            onContinueWave?.invoke()
+        }
+    }
+
+    /** True if the cell is a valid belt endpoint (pulley, gear-pulley, or the motor). */
+    private fun isBeltEndpoint(col: Int, row: Int, state: GameState): Boolean {
+        if (col == state.factory.motorGridX && row == state.factory.motorGridY) return true
+        val comp = state.factory.componentAt(col, row)
+        return comp?.type == ComponentType.PULLEY || comp?.type == ComponentType.GEAR_PULLEY
     }
 
     // ---- Renderer -----------------------------------------------------------
@@ -193,6 +341,7 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
         val canvas = holder.lockCanvas() ?: return
         try {
             drawBattlefield(canvas, state, l, interpolation)
+            if (state.betweenWaves) drawStoreOverlay(canvas, state, l)
             drawDivider(canvas, l)
             drawFactory(canvas, state, l)
         } finally {
@@ -296,6 +445,131 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
     }
 
     private fun unitRadius(l: SceneLayout): Float = l.screenWidth / 3f * 0.14f
+
+    // ---- Store overlay (between waves) --------------------------------------
+
+    /**
+     * Draws a semi-transparent overlay on the battlefield showing:
+     *  - Wave-cleared title
+     *  - Current store rotation (3 items) with BUY buttons
+     *  - Player inventory for placement selection
+     *  - NEXT WAVE button
+     *
+     * Layout fractions are relative to [SceneLayout.battlefieldBottom] vertically
+     * and [SceneLayout.screenWidth] horizontally. Must match [handleOverlayTouch].
+     */
+    private fun drawStoreOverlay(canvas: Canvas, state: GameState, l: SceneLayout) {
+        val bb = l.battlefieldBottom
+        val sw = l.screenWidth
+
+        // Dim background.
+        canvas.drawRect(0f, 0f, sw, bb, overlayBgPaint)
+
+        // Title.
+        canvas.drawText(
+            "WAVE ${state.currentWaveIndex + 1} CLEARED",
+            sw / 2f,
+            bb * 0.10f,
+            overlayTitlePaint,
+        )
+
+        // Store items.
+        canvas.drawText("STORE", sw / 2f, bb * 0.17f, overlayTitlePaint)
+        val rowH = bb * OVERLAY_ROW_H
+        for ((i, item) in state.store.rotation.withIndex()) {
+            val rowTop = bb * OVERLAY_STORE_ROW_TOPS[i]
+            // Item background.
+            rect.set(sw * 0.04f, rowTop, sw * 0.96f, rowTop + rowH)
+            canvas.drawRect(rect, invItemBgPaint)
+
+            // Item label.
+            val compText = storeItemLabel(item.component)
+            canvas.drawText(
+                compText,
+                sw * 0.08f,
+                rowTop + rowH * 0.65f,
+                overlayItemPaint,
+            )
+
+            // Cost.
+            canvas.drawText(
+                "${item.oreCost} ore",
+                sw * 0.52f,
+                rowTop + rowH * 0.65f,
+                overlayItemPaint,
+            )
+
+            // BUY button.
+            val buyLeft = sw * OVERLAY_BUY_X_FRAC
+            rect.set(buyLeft, rowTop + rowH * 0.12f, sw * 0.94f, rowTop + rowH * 0.88f)
+            val canAfford = state.wallet.ore >= item.oreCost
+            buyButtonPaint.alpha = if (canAfford) 255 else 100
+            canvas.drawRect(rect, buyButtonPaint)
+            canvas.drawText(
+                "BUY",
+                buyLeft + (sw * 0.94f - buyLeft) / 2f,
+                rowTop + rowH * 0.65f,
+                buyButtonTextPaint,
+            )
+        }
+        buyButtonPaint.alpha = 255
+
+        // Inventory section.
+        val invTop = bb * OVERLAY_INV_ROW_TOP
+        canvas.drawText("INVENTORY", sw / 2f, invTop - rowH * 0.10f, overlayTitlePaint)
+        val inv = state.playerInventory
+        if (inv.isEmpty()) {
+            canvas.drawText("(empty)", sw / 2f, invTop + rowH * 0.65f, overlayItemPaint.also {
+                it.textAlign = Paint.Align.CENTER
+            })
+            overlayItemPaint.textAlign = Paint.Align.LEFT
+        } else {
+            val itemW = sw / inv.size.toFloat()
+            for ((i, comp) in inv.withIndex()) {
+                val left = i * itemW
+                rect.set(left + 4f, invTop, left + itemW - 4f, invTop + rowH)
+                canvas.drawRect(rect, if (i == selectedInventoryIndex) invItemSelPaint else invItemBgPaint)
+                if (i == selectedInventoryIndex) {
+                    canvas.drawRect(rect, selectionPaint)
+                }
+                canvas.drawText(
+                    compLabel(comp),
+                    left + itemW / 2f,
+                    invTop + rowH * 0.65f,
+                    labelPaint,  // CENTER aligned, correct for centred item cells
+                )
+            }
+        }
+
+        // NEXT WAVE button.
+        val contTop  = bb * OVERLAY_CONT_TOP
+        val contBott = bb * OVERLAY_CONT_BOTTOM
+        rect.set(sw * 0.25f, contTop, sw * 0.75f, contBott)
+        canvas.drawRect(rect, continueButtonPaint)
+        canvas.drawText(
+            "NEXT WAVE",
+            sw / 2f,
+            contTop + (contBott - contTop) * 0.62f,
+            overlayTitlePaint,
+        )
+    }
+
+    private fun storeItemLabel(comp: Component): String {
+        val typeName = when (comp.type) {
+            ComponentType.GEAR        -> "Gear"
+            ComponentType.PULLEY      -> "Pulley"
+            ComponentType.GEAR_PULLEY -> "Gear-Pulley"
+            else                      -> comp.type.name
+        }
+        return "$typeName  sz ${comp.size}"
+    }
+
+    private fun compLabel(comp: Component): String = when (comp.type) {
+        ComponentType.GEAR        -> "G${comp.size}"
+        ComponentType.PULLEY      -> "P${comp.size}"
+        ComponentType.GEAR_PULLEY -> "GP${comp.size}"
+        else                      -> "${comp.size}"
+    }
 
     // ---- Divider ------------------------------------------------------------
 
@@ -500,5 +774,25 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
 
         private const val WEAR_STAGE2 = 0.33f  // spec §5.6: Functional → Worse for wear
         private const val WEAR_STAGE3 = 0.66f  // spec §5.6: Worse for wear → Critical
+
+        // ---- Store overlay layout (fractions of battlefieldBottom / screenWidth) ----
+
+        /** Top Y fractions for each of the 3 store item rows. */
+        private val OVERLAY_STORE_ROW_TOPS = floatArrayOf(0.21f, 0.33f, 0.45f)
+
+        /** Height of each item row as a fraction of battlefieldBottom. */
+        private const val OVERLAY_ROW_H = 0.10f
+
+        /** X start of BUY button as a fraction of screenWidth. */
+        private const val OVERLAY_BUY_X_FRAC = 0.68f
+
+        /** Top Y fraction for the inventory strip. */
+        private const val OVERLAY_INV_ROW_TOP = 0.62f
+
+        /** Top Y fraction for the NEXT WAVE button. */
+        private const val OVERLAY_CONT_TOP = 0.80f
+
+        /** Bottom Y fraction for the NEXT WAVE button. */
+        private const val OVERLAY_CONT_BOTTOM = 0.91f
     }
 }

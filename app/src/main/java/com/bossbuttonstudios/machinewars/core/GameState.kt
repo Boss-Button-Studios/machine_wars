@@ -53,6 +53,30 @@ class GameState(
     var isOver: Boolean = false
     var playerWon: Boolean = false
 
+    // --- Between-wave state (Session 6) ---
+    /**
+     * True when the current wave is fully cleared and the player is in the
+     * between-wave shopping window. [WaveManager] sets this; the player clears
+     * it by tapping NEXT WAVE in [com.bossbuttonstudios.machinewars.rendering.GameView].
+     *
+     * Written on the game-loop thread by WaveManager; read on the main thread
+     * by GameView touch handling. @Volatile — one-tick stale is acceptable.
+     */
+    @Volatile var betweenWaves: Boolean = false
+
+    /**
+     * Per-machine fractional spawn token. Accumulates `outputRatePerSec * dt`
+     * each tick; a unit is produced when the token reaches 1.0 (spec §5.7).
+     * Keys are combat machine IDs.
+     */
+    val spawnTokens: MutableMap<java.util.UUID, Float> = mutableMapOf()
+
+    /**
+     * Sub-integer ore accumulator for miner output. Incremented by
+     * `outputRatePerSec * dt` each tick; integer portion earned and cleared.
+     */
+    var oreAccumulator: Float = 0f
+
     // --- Pending lane assignments from input (Session 5 writes here) ---
     /**
      * Maps machine ID to the lane the player has assigned it to.
