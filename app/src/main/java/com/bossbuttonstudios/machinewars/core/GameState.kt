@@ -49,6 +49,11 @@ class GameState(
     // --- Enemy base HP (BASE_ATTACK missions only) ---
     var enemyBaseHp: Float = BASE_HP
 
+    // --- Player base (factory wall) HP ---
+    /** HP of the player's factory wall. Enemies deal damage when they reach
+     *  position 0.0. Reaching zero is a loss condition in all mission types. */
+    var playerBaseHp: Float = BASE_HP
+
     // --- Win/loss ---
     var isOver: Boolean = false
     var playerWon: Boolean = false

@@ -555,17 +555,28 @@ class TargetingPriorityTest {
         assertEquals(UnitState.ENGAGING, art.state)
     }
 
-    @Test fun `enemy unit does not acquire friendly base`() {
+    @Test fun `enemy unit acquires player base when in range`() {
         val state = makeState()
+        // Artillery range 8.0 → normalised 0.8; position 0.75 puts base (at 0.0) within range.
         val art = unit(UnitType.ARTILLERY, Team.ENEMY, lane = 1, position = 0.75f)
         state.units.add(art)
 
         targeting.tick(state)
 
-        // Enemy units do not target the enemy base (player's base is at 0.0,
-        // handled when we implement player base HP in a later session).
-        assertNull(art.targetId)
-        assertEquals(UnitState.ADVANCING, art.state)
+        assertEquals(TargetingSystem.PLAYER_BASE_ID, art.targetId)
+        assertEquals(UnitState.ENGAGING, art.state)
+    }
+
+    @Test fun `enemy unit does not acquire player base when out of range`() {
+        val state = makeState()
+        // Brute range 1.5 → normalised 0.15; position 0.5 puts base (at 0.0) out of range.
+        val brute = unit(UnitType.BRUTE, Team.ENEMY, lane = 1, position = 0.5f)
+        state.units.add(brute)
+
+        targeting.tick(state)
+
+        assertNull(brute.targetId)
+        assertEquals(UnitState.ADVANCING, brute.state)
     }
 
     @Test fun `Brute acquires wreckage blocking its lane before enemy units`() {
@@ -675,15 +686,25 @@ class WinConditionBaseAttackTest {
         assertTrue(state.playerWon)
     }
 
-    @Test fun `all player units dead triggers loss`() {
+    @Test fun `player base HP zero triggers loss`() {
         val state = makeState(type = MissionType.BASE_ATTACK)
-        state.enemyBaseHp = 500f
-        // No player units added — livingUnits contains no PLAYER
+        state.enemyBaseHp  = 500f
+        state.playerBaseHp = 0f
 
         checker.tick(state)
 
         assertTrue(state.isOver)
         assertFalse(state.playerWon)
+    }
+
+    @Test fun `no player units alive does not trigger loss`() {
+        val state = makeState(type = MissionType.BASE_ATTACK)
+        state.enemyBaseHp = 500f
+        // No player units — should NOT trigger loss (machines will produce more)
+
+        checker.tick(state)
+
+        assertFalse(state.isOver)
     }
 
     @Test fun `ongoing battle does not trigger over`() {
@@ -736,10 +757,10 @@ class WinConditionTimedSurvivalTest {
         assertFalse(state.isOver)
     }
 
-    @Test fun `player dies before timer triggers loss`() {
+    @Test fun `player base HP zero triggers loss in timed survival`() {
         val state = makeState(type = MissionType.TIMED_SURVIVAL, timeLimitSeconds = 30f)
         state.elapsedSeconds = 10f
-        // No player units
+        state.playerBaseHp  = 0f
 
         checker.tick(state)
 
@@ -773,10 +794,10 @@ class WinConditionResourceHuntTest {
         assertFalse(state.isOver)
     }
 
-    @Test fun `player dies before target triggers loss`() {
+    @Test fun `player base HP zero triggers loss in resource hunt`() {
         val state = makeState(type = MissionType.RESOURCE_HUNT, oreTarget = 500)
         state.wallet.earnOre(100)
-        // No player units
+        state.playerBaseHp = 0f
 
         checker.tick(state)
 

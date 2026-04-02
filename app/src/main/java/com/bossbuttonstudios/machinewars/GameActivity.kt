@@ -70,9 +70,9 @@ class GameActivity : AppCompatActivity() {
             motorGridX = 0,
             motorGridY = 0,
             machines = listOf(
-                Machine(type = MachineType.COMBAT_BRUTE,      gridX = 2, gridY = 0),
-                Machine(type = MachineType.COMBAT_SKIRMISHER, gridX = 4, gridY = 0),
-                Machine(type = MachineType.COMBAT_ARTILLERY,  gridX = 2, gridY = 2),
+                Machine(type = MachineType.COMBAT_BRUTE,      gridX = 2, gridY = 0, assignedLane = 0),
+                Machine(type = MachineType.COMBAT_SKIRMISHER, gridX = 4, gridY = 0, assignedLane = 2),
+                Machine(type = MachineType.COMBAT_ARTILLERY,  gridX = 2, gridY = 2, assignedLane = 1),
                 Machine(type = MachineType.MINER,             gridX = 4, gridY = 2),
             ),
         )

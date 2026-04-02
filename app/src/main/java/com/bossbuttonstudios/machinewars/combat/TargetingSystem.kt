@@ -45,10 +45,14 @@ class TargetingSystem {
      * [GameState.enemyBaseHp] instead of a [UnitInstance].
      */
     companion object {
-        val ENEMY_BASE_ID: UUID = UUID(0L, 1L)
+        val ENEMY_BASE_ID: UUID  = UUID(0L, 1L)
+        val PLAYER_BASE_ID: UUID = UUID(0L, 2L)
 
         /** Normalised position of the enemy base (far end of the field). */
-        const val ENEMY_BASE_POSITION = 1.0f
+        const val ENEMY_BASE_POSITION  = 1.0f
+
+        /** Normalised position of the player's factory wall (near end). */
+        const val PLAYER_BASE_POSITION = 0.0f
     }
 
     /**
@@ -112,14 +116,13 @@ class TargetingSystem {
             return
         }
 
-        // --- 4. Enemy base (player units only) ---
-        if (unit.team == Team.PLAYER) {
-            val baseInRange = isAheadAndInRange(unit, ENEMY_BASE_POSITION, normalizedRange)
-            if (baseInRange) {
-                unit.targetId = ENEMY_BASE_ID
-                unit.state = UnitState.ENGAGING
-                return
-            }
+        // --- 4. Enemy base (player units) / Player base (enemy units) ---
+        val baseId       = if (unit.team == Team.PLAYER) ENEMY_BASE_ID  else PLAYER_BASE_ID
+        val basePosition = if (unit.team == Team.PLAYER) ENEMY_BASE_POSITION else PLAYER_BASE_POSITION
+        if (isAheadAndInRange(unit, basePosition, normalizedRange)) {
+            unit.targetId = baseId
+            unit.state    = UnitState.ENGAGING
+            return
         }
 
         // No target found — ensure unit is advancing

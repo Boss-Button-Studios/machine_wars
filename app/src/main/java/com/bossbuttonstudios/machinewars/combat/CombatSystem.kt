@@ -70,6 +70,16 @@ class CombatSystem(private val random: Random = Random.Default) {
             return
         }
 
+        // --- Player base (factory wall) ---
+        if (targetId == TargetingSystem.PLAYER_BASE_ID) {
+            val multiplier = if (shooter.type == UnitType.ARTILLERY)
+                CombatConstants.BUILDING_DAMAGE_MULTIPLIER else 1f
+            val damage = rollDamage(shooter.stats.damage, multiplier)
+            state.playerBaseHp -= damage
+            if (state.playerBaseHp < 0f) state.playerBaseHp = 0f
+            return
+        }
+
         // --- Unit target ---
         val target = state.livingUnits.find { it.id == targetId } ?: return
 

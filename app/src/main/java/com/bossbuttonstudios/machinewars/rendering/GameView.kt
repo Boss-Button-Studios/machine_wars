@@ -74,6 +74,10 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
     private val baseHpPaint    = solid("#EF5350")
     private val baseEdgePaint  = stroke("#555555", 2f)
 
+    // Player base (factory wall) strip — always visible
+    private val playerBaseBlockPaint = solid("#0D47A1")
+    private val playerBaseHpPaint    = solid("#1976D2")
+
     // Units
     private val playerPaint   = solid("#2196F3")
     private val enemyPaint    = solid("#E53935")
@@ -359,6 +363,7 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
     ) {
         canvas.drawRect(0f, 0f, l.screenWidth, l.battlefieldBottom, bfBgPaint)
         drawEnemyBase(canvas, state, l)
+        drawPlayerBase(canvas, state, l)
         drawBoundaries(canvas, state, l)
         state.wreckage.filterNot { it.isCleared }.forEach { drawWreckage(canvas, it, l) }
         state.livingUnits.forEach { drawUnit(canvas, it, l, interpolation) }
@@ -371,6 +376,15 @@ class GameView(context: Context) : SurfaceView(context), Renderer, SurfaceHolder
         val fraction = (state.enemyBaseHp / GameState.BASE_HP).coerceIn(0f, 1f)
         canvas.drawRect(0f, 0f, l.screenWidth * fraction, stripH, baseHpPaint)
         canvas.drawRect(0f, 0f, l.screenWidth, stripH, baseEdgePaint)
+    }
+
+    private fun drawPlayerBase(canvas: Canvas, state: GameState, l: SceneLayout) {
+        val stripH = l.battlefieldHeight * 0.045f
+        val top    = l.battlefieldBottom - stripH
+        canvas.drawRect(0f, top, l.screenWidth, l.battlefieldBottom, playerBaseBlockPaint)
+        val fraction = (state.playerBaseHp / GameState.BASE_HP).coerceIn(0f, 1f)
+        canvas.drawRect(0f, top, l.screenWidth * fraction, l.battlefieldBottom, playerBaseHpPaint)
+        canvas.drawRect(0f, top, l.screenWidth, l.battlefieldBottom, baseEdgePaint)
     }
 
     private fun drawBoundaries(canvas: Canvas, state: GameState, l: SceneLayout) {
